@@ -29,8 +29,9 @@ def cmd_install(args: argparse.Namespace) -> int:
         print(f"Error: bundled agent file not found at {src}", file=sys.stderr)
         return 1
 
-    if args.test_repository_path:
-        dest_dir = Path(args.test_repository_path) / ".github" / "agents"
+    repo_path = args.test_repository_path or os.environ.get("TEST_REPOSITORY_PATH")
+    if repo_path:
+        dest_dir = Path(repo_path) / ".github" / "agents"
     else:
         dest_dir = _vscode_prompts_dir()
     dest_dir.mkdir(parents=True, exist_ok=True)
