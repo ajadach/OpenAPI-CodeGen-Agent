@@ -20,7 +20,7 @@ def _vscode_prompts_dir() -> Path:
 
 
 def _get_agent_file() -> Path:
-    return Path(__file__).parent / "agent" / "OpenAPI_CodGen.md"
+    return Path(__file__).parent / "agent" / "open-api-code-gen.agent.md"
 
 
 def cmd_install(args: argparse.Namespace) -> int:
@@ -36,7 +36,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         dest_dir = _vscode_prompts_dir()
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    dest = dest_dir / "OpenAPI_CodGen.md"
+    dest = dest_dir / "open-api-code-gen.agent.md"
     shutil.copy2(src, dest)
     print(f"Agent prompt installed to: {dest}")
     return 0
