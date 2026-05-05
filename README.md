@@ -32,14 +32,105 @@
 
 ---
 
+## � Installation
+
+### From PyPI
+
+```bash
+pip install openapi-codegen-agent
+```
+
+### From GitHub (latest main branch)
+
+```bash
+pip install git+https://github.com/arturjadach/openapi-codegen-agent.git
+```
+
+### From a specific tag / branch
+
+```bash
+pip install git+https://github.com/arturjadach/openapi-codegen-agent.git@v1.0.0
+```
+
+### From local source (editable)
+
+```bash
+git clone https://github.com/arturjadach/openapi-codegen-agent.git
+cd openapi-codegen-agent
+pip install -e .
+```
+
+---
+
+## 🖥️ CLI Usage
+
+After installation the `openapi-codegen-agent` command is available in your terminal.
+
+### `install` — add the agent prompt
+
+Copies the bundled `.agent.md` prompt file to the correct location so your AI assistant can use it.
+
+**Default (VS Code User prompts folder):**
+
+```bash
+openapi-codegen-agent install
+```
+
+The agent file is installed to the VS Code global User prompts directory:
+
+| OS | Path |
+|----|------|
+| Windows | `%APPDATA%\Code\User\prompts\` |
+| macOS | `~/Library/Application Support/Code/User/prompts/` |
+| Linux | `~/.config/Code/User/prompts/` |
+
+**Into a test repository (`.github/agents/`):**
+
+```bash
+openapi-codegen-agent install --test_repository_path /path/to/your/repo
+```
+
+This places the agent file at `<repo>/.github/agents/open-api-code-gen.agent.md`, making it available as a GitHub Copilot agent scoped to that repository. No manual file copying required.
+
+#### `install` parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `--test_repository_path DIR` | Path to the target repository. Agent is written to `DIR/.github/agents/`. | VS Code User prompts folder |
+
+You can also set the path via an environment variable instead of the flag:
+
+```bash
+# PowerShell
+$env:TEST_REPOSITORY_PATH = "C:\Projects\my-api-tests"
+openapi-codegen-agent install
+
+# Bash / zsh
+export TEST_REPOSITORY_PATH=/projects/my-api-tests
+openapi-codegen-agent install
+```
+
+---
+
+### `path` — print the bundled agent file path
+
+```bash
+openapi-codegen-agent path
+```
+
+Prints the absolute path to the `.agent.md` file bundled inside the installed package. Useful for piping or scripting.
+
+---
+
 ## 🚀 How to Use
 
-1. **Copy the prompt** from [`codgen_prompt.md`](./codgen_prompt.md) and paste it into your AI assistant as the system/instruction prompt.
-2. **Start a conversation.** The AI will:
+1. **Install the agent prompt** by running `openapi-codegen-agent install` (or `openapi-codegen-agent install --test_repository_path <repo>`).
+2. **Open GitHub Copilot** (or another compatible AI assistant) and select the `open-api-code-gen` agent.
+3. **Start a conversation.** The AI will:
    - Introduce the library assumptions
    - Guide you through 6 structured steps (see below)
    - Save your answers to `status.json` after each question
-3. **Resume any time.** If you close the session, just paste the prompt again — the AI will read `status.json` and continue from where you left off.
+4. **Resume any time.** If you close the session, start the agent again — the AI will read `status.json` and continue from where you left off.
 
 ---
 
