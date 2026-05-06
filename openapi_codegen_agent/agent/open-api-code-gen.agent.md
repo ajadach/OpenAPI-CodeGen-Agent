@@ -33,6 +33,7 @@ At the very beginning of the procedure (before Step 1), AI creates the `status.j
   "base_endpoint": null,
   "library_folder": null,
   "openapi_json_confirmed": null,
+  "check_sum_openapi_json": null,
   "language": null,
   "language_version": null,
   "http_library": null,
@@ -41,7 +42,7 @@ At the very beginning of the procedure (before Step 1), AI creates the `status.j
   "modules": null,
   "generation": null,
   "pip_package": null,
-  "testpypi_upload": null
+  "robot_framework_support": null
 }
 ```
 
@@ -73,6 +74,7 @@ At the very start of every run, read `status.json` before doing anything else.
        • base_endpoint        : <value or "not set">
        • library_folder       : <value or "not set">
        • openapi_json_confirmed: <value or "not set">
+       • check_sum_openapi_json: <value or "not set">
        • language             : <value or "not set">
        • language_version     : <value or "not set">
        • http_library         : <value or "not set">
@@ -81,7 +83,7 @@ At the very start of every run, read `status.json` before doing anything else.
        • modules              : <value or "not set">
        • generation           : <value or "not set">
        • pip_package          : <value or "not set">
-       • testpypi_upload      : <value or "not set">
+       • robot_framework_support: <value or "not set">
      ```
   2. Skip every question / sub-step whose corresponding `status.json` field is already non-null.
   3. **Immediately after displaying the summary — without waiting for any user input — ask the next unanswered question** (the first field that is still `null`).
@@ -103,8 +105,21 @@ Do not provide the user with any examples or hints — wait for their answer.
 2. Create the given folder, and inside it:
    - a `trash_AI` folder — a place where AI puts temporary files that the user does not need
    - a `swagger` folder — here the user will place the `openapi.json` file
-3. Ask the user to place the `openapi.json` file (compliant with the OpenAPI standard) in the `swagger` folder
-4. Wait for confirmation from the user that the file has been created → `status.json: openapi_json_confirmed`
+3. Ask the user one of the following:
+   - If they have the `openapi.json` file locally — ask them to place it in the `swagger` folder and type **"done"**
+   - If the file is available online — ask them to provide the URL and AI will download it automatically
+   - Hint to the user: *"Type 'done' if you placed the file manually, or paste a URL to download it automatically."*
+4. Handle the user's response:
+   - If the response starts with `http://` or `https://` — download the file automatically:
+     - Use `Invoke-WebRequest -Uri "<url>" -OutFile "{library_folder}/swagger/openapi.json"` (PowerShell) or `wget -O {library_folder}/swagger/openapi.json <url>` (Linux/macOS)
+     - Confirm to the user that the file was downloaded successfully
+   - If the response is **"done"** — assume the file was placed manually and proceed
+5. After the file is confirmed present (downloaded or manual), calculate its SHA-256 checksum:
+   - PowerShell: `(Get-FileHash "{library_folder}/swagger/openapi.json" -Algorithm SHA256).Hash`
+   - Linux/macOS: `sha256sum {library_folder}/swagger/openapi.json`
+   - Save the resulting hash string in `status.json` → `status.json: check_sum_openapi_json`
+   - Display the checksum to the user
+6. Save confirmation in `status.json` → `status.json: openapi_json_confirmed`
 
 ## Step 3 — Technical Library Configuration
 
@@ -146,7 +161,74 @@ Save the answers in `status.json`.
    - Skip modules with state `done`
    - Resume from the first module with state `pending` or `in_progress`
 
-## Step 5 — pip Package (Python only)
+## Step 5 — Robot Framework Support (Python only)
+
+This step is executed only if `status.json: language` is `python`.
+
+1. Ask the user: **"Do you want to add Robot Framework support to the library?"**
+   - Save the answer in `status.json: robot_framework_support` (`true` / `false`)
+2. If the answer is `true`:
+
+   **2a. Add `@keyword` decorators to every module method**
+
+   For each file in `{library_folder}/{client_folder}/modules/` (excluding `__init__.py`):
+   - Add import at the top of the file (after existing imports):
+     ```python
+     from robot.api.deco import keyword
+     ```
+   - Add `@keyword("<Keyword Name>")` decorator **above** the `def` line of every public method (below `@validate_call` if present)
+   - Keyword name is derived from the method name by: replacing underscores with spaces, capitalizing each word
+     - Example: `post_add_pet` → `"Post Add Pet"`
+     - Example: `get_find_pets_by_status` → `"Get Find Pets By Status"`
+
+   **2b. Update `{library_folder}/{client_folder}/__init__.py`**
+
+   Replace the contents of `__init__.py` with the following structure:
+   ```python
+   import logging
+
+   from robot.libraries.BuiltIn import BuiltIn, RobotNotRunningError
+
+   from .client import <ClientClass>
+   from .modules import *
+   from .modules import <Module1Class> as <Module1>
+   from .modules import <Module2Class> as <Module2>
+   # ... repeat for each module
+
+   __all__ = ["<ClientClass>"]
+
+   MODULES = __all__ + (
+       "<Module1>",
+       "<Module2>",
+       # ... repeat for each module
+   )
+
+   # automatically import all sub libraries into RFW context
+   RFW = BuiltIn()
+   try:
+       for name in MODULES:
+           RFW.import_library("{client_folder}." + name)
+   except RobotNotRunningError:
+       pass
+
+   # initialize logging
+   log = logging.getLogger(__name__)
+   log.addHandler(logging.NullHandler())
+   ```
+
+   Where:
+   - `<ClientClass>` — the main client class name (e.g. `PetStoreClient`)
+   - `<Module1Class>` — the module class name from `modules/__init__.py` (e.g. `PetModule`)
+   - `<Module1>` — short alias used as Robot Framework sub-library name (e.g. `Pet`)
+   - `{client_folder}` — value from `status.json: client_folder`
+
+   **Purpose:** This enables Robot Framework modularity — keywords are accessible as:
+   `{ClientClass}.{Module}.{Keyword Name}` (e.g. `PetStoreClient.Pet.Post Add Pet`)
+
+3. If the answer is `false`:
+   - Skip this step and continue
+
+## Step 6 — pip Package (Python only)
 
 This step is executed only if `status.json: language` is `python`.
 
@@ -173,9 +255,6 @@ This step is executed only if `status.json: language` is `python`.
    - Install the `build` tool: `pip install build`
    - Build the package: `python -m build` (run inside `library_folder`)
    - Inform the user that the `.whl` and `.tar.gz` packages are available in the `dist/` folder
-   - Optionally: ask the user whether they want to publish the package to TestPyPI:
-     - If yes: install `twine` and run `twine upload --repository testpypi dist/*`
-     - Save the decision in `status.json: testpypi_upload` (`true` / `false`)
 3. If the answer is `false`:
    - Inform the user that the library can be used locally without installing via pip
    - Provide clear instructions on how to use the library locally:
@@ -191,7 +270,30 @@ This step is executed only if `status.json: language` is `python`.
      ```
    - Remind the user that no `pip install` is required — the library works as a local package
 
-## Step 6 — Success Summary
+## Step 6 — Archive AI Artifacts
+
+Before displaying the success summary, copy the generation artifacts into the client package for future reference:
+
+1. Create folder `{library_folder}/{client_folder}/AI/swagger/`
+2. Copy `{library_folder}/swagger/openapi.json` → `{library_folder}/{client_folder}/AI/swagger/openapi.json`
+3. Copy `status.json` → `{library_folder}/{client_folder}/AI/status.json`
+
+These files may be used in the future to regenerate or update the library.
+
+- PowerShell:
+  ```powershell
+  New-Item -ItemType Directory -Path "{library_folder}/{client_folder}/AI/swagger" -Force
+  Copy-Item "{library_folder}/swagger/openapi.json" -Destination "{library_folder}/{client_folder}/AI/swagger/openapi.json"
+  Copy-Item "status.json" -Destination "{library_folder}/{client_folder}/AI/status.json"
+  ```
+- Linux/macOS:
+  ```bash
+  mkdir -p {library_folder}/{client_folder}/AI/swagger
+  cp {library_folder}/swagger/openapi.json {library_folder}/{client_folder}/AI/swagger/openapi.json
+  cp status.json {library_folder}/{client_folder}/AI/status.json
+  ```
+
+## Step 7 — Success Summary
 
 After all steps are completed, display a final success message to the user in the following format:
 
@@ -209,7 +311,7 @@ After all steps are completed, display a final success message to the user in th
   🔗 Base endpoint    : {base_endpoint}
   🧩 Modules generated: {list of modules with status "done"}
   📄 pip package      : {pip_package}
-  🚀 TestPyPI upload  : {testpypi_upload}
+  🤖 Robot Framework  : {robot_framework_support}
 
 To use the library:
 
@@ -220,5 +322,4 @@ Thank you for using Open API codegen by AI! 🚀
 ```
 
 - Fill in all placeholders with actual values from `status.json`
-- If `testpypi_upload` is `null` (step was skipped), display `skipped`
-- If `pip_package` is `false`, omit the TestPyPI line entirely
+- If `robot_framework_support` is `null` (step was skipped), display `skipped`
