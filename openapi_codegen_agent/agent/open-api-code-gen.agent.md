@@ -91,51 +91,74 @@ At the very start of every run, read `status.json` before doing anything else.
 
 ## Step 1 — API Information
 
-Ask the user the following questions and save the answers in `status.json`:
-Do not provide the user with any examples or hints — wait for their answer.
+Ask the user the following questions and save the answers in `status.json`.
+For each question, display the short context note below it before waiting for the answer.
 
 1. Provide the URL to the Swagger documentation → `status.json: swagger_url`
+   > This is the address of the human-readable API documentation (e.g. Swagger UI page). It is saved for reference and helps locate the `openapi.json` file in the next step.
+
 2. Provide the main REST API endpoint → `status.json: base_endpoint`
+   > This becomes the `BASE_URL` in `basic.py` and the default value in the client constructor. All generated API calls will be sent to this address. If no scheme is provided, `https://` will be added automatically — e.g. `petstore.swagger.io/v2` → `https://petstore.swagger.io/v2`.
 
 ## Step 2 — Project Structure Configuration
 
-Do not provide the user with any examples or hints — wait for their answer.
+For each question, display the short context note below it before waiting for the answer.
 
 1. Ask the user what the library folder should be named and save the answer in `status.json` → `status.json: library_folder`
-2. Create the given folder, and inside it:
+   > This is the root folder of the entire project — it will contain the client package, swagger file, and build artifacts. The Python client package will be automatically named `{library_folder}Client`. For example: `PetStore` → root folder `PetStore/`, Python package `PetStoreClient/`.
+2. Automatically derive `client_folder` as `{library_folder}Client` and save it in `status.json: client_folder` — **do not ask the user for this value**
+   - Example: `library_folder = PetStore` → `client_folder = PetStoreClient`
+3. Create the given folder, and inside it:
    - a `trash_AI` folder — a place where AI puts temporary files that the user does not need
    - a `swagger` folder — here the user will place the `openapi.json` file
-3. Ask the user one of the following:
+4. Ask the user one of the following:
    - If they have the `openapi.json` file locally — ask them to place it in the `swagger` folder and type **"done"**
    - If the file is available online — ask them to provide the URL and AI will download it automatically
    - Hint to the user: *"Type 'done' if you placed the file manually, or paste a URL to download it automatically."*
-4. Handle the user's response:
+5. Handle the user's response:
    - If the response starts with `http://` or `https://` — download the file automatically:
      - Use `Invoke-WebRequest -Uri "<url>" -OutFile "{library_folder}/swagger/openapi.json"` (PowerShell) or `wget -O {library_folder}/swagger/openapi.json <url>` (Linux/macOS)
      - Confirm to the user that the file was downloaded successfully
    - If the response is **"done"** — assume the file was placed manually and proceed
-5. After the file is confirmed present (downloaded or manual), calculate its SHA-256 checksum:
+6. After the file is confirmed present (downloaded or manual), calculate its SHA-256 checksum:
    - PowerShell: `(Get-FileHash "{library_folder}/swagger/openapi.json" -Algorithm SHA256).Hash`
    - Linux/macOS: `sha256sum {library_folder}/swagger/openapi.json`
    - Save the resulting hash string in `status.json` → `status.json: check_sum_openapi_json`
    - Display the checksum to the user
-6. Save confirmation in `status.json` → `status.json: openapi_json_confirmed`
+7. Save confirmation in `status.json` → `status.json: openapi_json_confirmed`
 
 ## Step 3 — Technical Library Configuration
 
-Do not provide the user with any examples or hints — wait for their answer.
+For each question, display the short context note below it before waiting for the answer.
 
 1. In what programming language should the library be created? → `status.json: language`
+   > All generated code, syntax, and tooling will follow this language's conventions. For Python, Pydantic will be used for argument validation and Robot Framework support will be available as an optional add-on.
+
 2. What version of that language should it be compatible with? → `status.json: language_version`
+   > This version is used in `pyproject.toml` (`requires-python`) and ensures the generated code syntax is compatible. For example: `3.12` → `requires-python = ">=3.12"`.
+
 3. Which library should be used for making REST API requests? → `status.json: http_library`
-4. What should the main folder of the library be named (where all client code will be stored)? → `status.json: client_folder`
-   - After receiving the answer, create this folder inside `library_folder`
+   > This library will be imported in every generated module and used to execute all HTTP calls. It will also be listed as a dependency in `pyproject.toml`. For example: `requests`.
+4. After receiving the answers, create the `{client_folder}` folder inside `{library_folder}` and create `{library_folder}/{client_folder}/basic.py` with the following content (use the value from `status.json: base_endpoint` for `BASE_URL`, adding `https://` if no scheme is present):
+     ```python
+     """Shared configuration for the API client.
+
+     BASE_URL and SESSION are set by the client __init__ before any module is used.
+     All modules import this module and read BASE_URL and SESSION at call time.
+     """
+
+     import requests
+
+     BASE_URL: str = "https://{base_endpoint}"
+     SESSION: requests.Session = requests.Session()
+     ```
 5. Should the methods in classes have a prefix matching the REST API method?
 
    - without prefix: `client.add_pet`
    - with prefix: `client.post_add_pet`
 
    → `status.json: method_prefix`
+   > This affects the naming of every generated method across all modules. The prefix is the HTTP verb (`get_`, `post_`, `put_`, `delete_`). With prefix the method names are more explicit about the HTTP operation; without prefix they are shorter. This choice applies consistently to all modules.
 
 Save the answers in `status.json`.
 
@@ -146,16 +169,33 @@ Save the answers in `status.json`.
 3. Ask the user whether they want to generate the library for all modules or only selected ones
    - If selected — ask for the module names
    - Save the choice in `status.json` → `status.json: modules`
+   > Each module corresponds to one API tag from `openapi.json` and becomes a separate Python file with its own class (e.g. tag `pet` → file `pet.py`, class `Pet`). Selecting only specific modules allows generating a partial client covering only the API resources the user needs.
 4. For each selected module, set the state in `status.json: generation` to `pending`
 5. Wait for user confirmation before starting code generation
 6. Generate modules one by one — for each module:
    - Before starting, set the state to `in_progress` in `status.json: generation`
-   - Generate the module file at `{library_folder}/{client_folder}/modules/{module}.py`
+   - **Naming convention:** the file is named after the tag (lowercase), and the class is named after the tag in PascalCase — e.g. tag `pet` → file `pet.py`, class `Pet`; tag `store` → file `store.py`, class `Store`
+   - Generate the module file at `{library_folder}/{client_folder}/modules/{module}.py`:
+     - The module class must have **no constructor parameters** — do not accept `base_url` or `session`
+     - Import shared config at the top: `from .. import basic`
+     - Expose `_base_url` and `_session` as read-only properties:
+       ```python
+       @property
+       def _base_url(self) -> str:
+           return basic.BASE_URL
+
+       @property
+       def _session(self):
+           return basic.SESSION
+       ```
    - Generate `{library_folder}/{client_folder}/modules/__init__.py` exporting all module classes
    - Generate `{library_folder}/{client_folder}/client.py` — the main client file that:
-     - accepts `base_url` from `status.json: base_endpoint`
-     - creates a shared `requests.Session()`
-     - passes `base_url` and `session` to each module
+     - imports `from . import basic`
+     - accepts `base_url` defaulting to the value from `status.json: base_endpoint`; adds `https://` prefix if no scheme is present
+     - sets `basic.BASE_URL = base_url` and `basic.SESSION = requests.Session()`
+     - creates each module instance **without arguments**: `self.{module} = {ModuleClass}()`
+     - **does NOT re-expose module methods** — users call `client.pet.method()`, `client.store.method()`, etc. directly
+     - **no `@keyword` decorators, no `ROBOT_LIBRARY_SCOPE`, no delegation methods at this stage**
    - After completion, set the state to `done` in `status.json: generation`
 7. At every start or resumption of the procedure, check `status.json: generation`:
    - Skip modules with state `done`
@@ -167,11 +207,13 @@ This step is executed only if `status.json: language` is `python`.
 
 1. Ask the user: **"Do you want to add Robot Framework support to the library?"**
    - Save the answer in `status.json: robot_framework_support` (`true` / `false`)
+   > If yes, every module method will be decorated with `@keyword` and `ROBOT_LIBRARY_SCOPE = "SUITE"` will be added to each module class. This makes each module importable as a standalone Robot Framework library — e.g. `Library    PetStoreClient.Pet` — with keywords callable as `PetStoreClient.Pet.Post Add Pet    ${pet}`.
 2. If the answer is `true`:
 
-   **2a. Add `@keyword` decorators to every module method**
+   **2a. Add `@keyword` decorators and `ROBOT_LIBRARY_SCOPE` to every module class**
 
    For each file in `{library_folder}/{client_folder}/modules/` (excluding `__init__.py`):
+   - Add `ROBOT_LIBRARY_SCOPE = "SUITE"` as a class attribute
    - Add import at the top of the file (after existing imports):
      ```python
      from robot.api.deco import keyword
@@ -181,32 +223,41 @@ This step is executed only if `status.json: language` is `python`.
      - Example: `post_add_pet` → `"Post Add Pet"`
      - Example: `get_find_pets_by_status` → `"Get Find Pets By Status"`
 
-   **2b. Update `{library_folder}/{client_folder}/__init__.py`**
+   **2b. Update `{library_folder}/{client_folder}/modules/__init__.py`**
 
-   Replace the contents of `__init__.py` with the following structure:
+   Export the short-named classes:
    ```python
+   from .pet import Pet
+   from .store import Store
+   from .user import User
+
+   __all__ = ["Pet", "Store", "User"]
+   ```
+
+   **2c. Update `{library_folder}/{client_folder}/client.py`**
+
+   - Add `__all__ = ["<ClientClass>"]` at module level (before the class definition)
+   - The client class itself does **not** get `@keyword` decorators and does **not** re-expose module methods — it only holds module instances (`self.pet`, `self.store`, etc.)
+   - No `ROBOT_LIBRARY_SCOPE` on the client class
+
+   **2d. Update `{library_folder}/{client_folder}/__init__.py`**
+
+   Replace the contents with the following structure:
+   ```python
+   """<ClientFolder> package."""
+
    import logging
 
    from robot.libraries.BuiltIn import BuiltIn, RobotNotRunningError
 
    from .client import <ClientClass>
-   from .modules import *
-   from .modules import <Module1Class> as <Module1>
-   from .modules import <Module2Class> as <Module2>
-   # ... repeat for each module
+   from .modules import <Module1Class>, <Module2Class>  # short names, e.g. Pet, Store, User
 
-   __all__ = ["<ClientClass>"]
+   LIBRARIES = ["<Module1Class>", "<Module2Class>"]  # short names used in import path
 
-   MODULES = __all__ + (
-       "<Module1>",
-       "<Module2>",
-       # ... repeat for each module
-   )
-
-   # automatically import all sub libraries into RFW context
    RFW = BuiltIn()
    try:
-       for name in MODULES:
+       for name in LIBRARIES:
            RFW.import_library("{client_folder}." + name)
    except RobotNotRunningError:
        pass
@@ -216,14 +267,21 @@ This step is executed only if `status.json: language` is `python`.
    log.addHandler(logging.NullHandler())
    ```
 
-   Where:
-   - `<ClientClass>` — the main client class name (e.g. `PetStoreClient`)
-   - `<Module1Class>` — the module class name from `modules/__init__.py` (e.g. `PetModule`)
-   - `<Module1>` — short alias used as Robot Framework sub-library name (e.g. `Pet`)
-   - `{client_folder}` — value from `status.json: client_folder`
+   **How it works in Robot Framework:**
+   ```robot
+   *** Settings ***
+   Library    {client_folder}            # loads PetStoreClient + auto-imports all modules
+   Library    {client_folder}.Pet        # makes Pet keywords available
 
-   **Purpose:** This enables Robot Framework modularity — keywords are accessible as:
-   `{ClientClass}.{Module}.{Keyword Name}` (e.g. `PetStoreClient.Pet.Post Add Pet`)
+   *** Test Cases ***
+   Example
+       ${pet}=    Evaluate    {"name": "doggie", "photoUrls": [], "status": "available"}
+       {client_folder}.Pet.Post Add Pet    ${pet}
+   ```
+
+   Each module is a standalone RF library. Keywords are namespaced as `{client_folder}.<ModuleName>.<Keyword Name>`.
+
+   > **Note:** `ROBOT_LIBRARY_SCOPE` and `@keyword` decorators in module files (`modules/*.py`) are added **only** in this step — they must not appear in the generated files before the user answers "yes" to Robot Framework support.
 
 3. If the answer is `false`:
    - Skip this step and continue
@@ -234,10 +292,12 @@ This step is executed only if `status.json: language` is `python`.
 
 1. Ask the user: **"Do you want to prepare the library as a ready-to-install pip package?"**
    - Save the answer in `status.json: pip_package` (`true` / `false`)
+   > If yes, a `pyproject.toml` and `README.md` will be created and `python -m build` will be run to produce a `.whl` and `.tar.gz` file in the `dist/` folder. The package can then be installed in any environment with `pip install dist/<package>.whl` — no manual path setup needed.
 2. If the answer is `true`:
    - Make sure the `library_folder` contains a valid `pyproject.toml` file with the following sections:
      - `[project]` — package name, version, description, author, requirements (`dependencies`)
-     - `[build-system]` — `requires = ["setuptools", "wheel"]`, `build-backend = "setuptools.backends.legacy:build"`
+     - `[build-system]` — `requires = ["setuptools", "wheel"]`, `build-backend = "setuptools.build_meta"`
+     - `[tool.setuptools.packages.find]` — `include = ["{client_folder}*"]` (prevents setuptools from accidentally packaging unrelated top-level folders such as `swagger` or `trash_AI`)
    - Make sure the `library_folder` contains a `README.md` file with the following content:
      - **Project title** — name of the generated library
      - **Description** — what API it covers, the base endpoint, and which modules are included
@@ -270,7 +330,7 @@ This step is executed only if `status.json: language` is `python`.
      ```
    - Remind the user that no `pip install` is required — the library works as a local package
 
-## Step 6 — Archive AI Artifacts
+## Step 7 — Archive AI Artifacts
 
 Before displaying the success summary, copy the generation artifacts into the client package for future reference:
 
